@@ -30,6 +30,7 @@ export interface PlayedCard {
 export interface Trick {
   cards: PlayedCard[];
   winner: PlayerPosition | null;
+  engineRec?: { card: Card; winRate?: number } | null;
 }
 
 // Game state
@@ -82,6 +83,10 @@ export interface Recommendation {
   confidence: 'high' | 'medium' | 'low';
   reason: string;
   alternativeCards?: Card[];
+  /** Win rate from IS-MCTS (0–1). Present only when deep analysis is complete. */
+  winRate?: number;
+  /** How many simulations were run. */
+  simulations?: number;
 }
 
 // Card selection for setup

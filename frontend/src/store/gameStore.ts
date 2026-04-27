@@ -3,11 +3,14 @@ import { persist } from 'zustand/middleware';
 import type { Card, GameState, PlayerPosition, Suit, PlayedCard, Recommendation, Bid } from '../types';
 import { cardsEqual } from '../types';
 
-export type AppPhase = 'setup' | 'bidding' | 'playing';
+export type AppPhase = 'setup' | 'bidding' | 'playing' | 'review';
 
 interface GameStore extends GameState {
   appPhase: AppPhase;
   setAppPhase: (phase: AppPhase) => void;
+
+  // Transient: engine recommendation snapshotted when south plays, cleared after trick awarded
+  southRecSnap: { card: Card; winRate?: number } | null;
 
   // Hand setup
   setPlayerHand: (cards: Card[]) => void;
@@ -39,8 +42,9 @@ interface GameStore extends GameState {
   resetGame: () => void;
 }
 
-const initialGameState: GameState & { appPhase: AppPhase } = {
+const initialGameState: GameState & { appPhase: AppPhase; southRecSnap: { card: Card; winRate?: number } | null } = {
   appPhase: 'setup',
+  southRecSnap: null,
   phase: 'bidding',
   playerHand: [],
   bids: [],
@@ -110,10 +114,15 @@ export const useGameStore = create<GameStore>()(
             ? state.playerHand.filter(c => !cardsEqual(c, card))
             : state.playerHand;
         const alreadyPlayed = state.playedCards.some(pc => cardsEqual(pc, card));
+        const southRecSnap =
+          player === 'south' && state.recommendation
+            ? { card: state.recommendation.card, winRate: state.recommendation.winRate }
+            : state.southRecSnap;
         set({
           playerHand: newHand,
           currentTrick: [...state.currentTrick, { player, card }],
           playedCards: alreadyPlayed ? state.playedCards : [...state.playedCards, card],
+          southRecSnap,
         });
       },
 
@@ -124,7 +133,11 @@ export const useGameStore = create<GameStore>()(
         const isTeam1 = winner === 'south' || winner === 'north';
         const newTricks = [...state.tricks];
         if (state.currentTrick.length > 0) {
-          newTricks.push({ cards: state.currentTrick, winner });
+          newTricks.push({
+            cards: state.currentTrick,
+            winner,
+            engineRec: state.southRecSnap ?? null,
+          });
         }
         set({
           teamTricks: {
@@ -134,6 +147,7 @@ export const useGameStore = create<GameStore>()(
           trickLeader: winner,
           currentTrick: [],
           tricks: newTricks,
+          southRecSnap: null,
         });
       },
 
@@ -161,8 +175,9 @@ export const useGameStore = create<GameStore>()(
       name: 'tarneeb-game',
       version: 1,
       partialize: (state) => {
-        // Don't persist the computed recommendation — it'll be recalculated
-        const { recommendation, ...rest } = state;
+        // Don't persist transient computed fields — they'll be recalculated
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { recommendation, southRecSnap, ...rest } = state;
         return rest;
       },
     }

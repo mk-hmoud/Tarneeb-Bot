@@ -12,6 +12,7 @@ interface GameTableProps {
   playerBid: number | null;
   playedCards: Card[];
   recommendation: Recommendation | null;
+  mctsComputing: boolean;
   onPlayCard: (card: Card) => void;
   onAwardTrick: (winner: PlayerPosition) => void;
   onUndoLastPlay: () => void;
@@ -25,6 +26,7 @@ export const GameTable: React.FC<GameTableProps> = ({
   playerBid,
   playedCards,
   recommendation,
+  mctsComputing,
   onPlayCard,
   onAwardTrick,
   onUndoLastPlay,
@@ -350,43 +352,74 @@ export const GameTable: React.FC<GameTableProps> = ({
           <div className="flex items-start gap-6 relative z-10">
             <div className="flex-shrink-0 relative group-hover:scale-110 transition-transform duration-500">
               <div className="absolute -inset-4 bg-blue-500/20 blur-2xl rounded-full animate-pulse"></div>
-              <CardComponent 
-                card={recommendation.card} 
-                size="md" 
+              <CardComponent
+                card={recommendation.card}
+                size="md"
                 isTrump={trumpSuit === recommendation.card.suit}
                 isRecommended={true}
               />
             </div>
             <div className="flex-1">
-              <div className="flex items-center gap-4 mb-3 flex-wrap">
+              <div className="flex items-center gap-3 mb-3 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></div>
-                  <span className="text-xl font-black text-white tracking-tight uppercase">AI Recommendation</span>
+                  {mctsComputing
+                    ? <div className="w-2 h-2 rounded-full bg-violet-400 animate-ping"></div>
+                    : <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                  }
+                  <span className="text-xl font-black text-white tracking-tight uppercase">
+                    {mctsComputing ? 'Analysing…' : 'AI Recommendation'}
+                  </span>
                 </div>
-                <span className={`
-                  px-4 py-1 rounded-full text-[10px] font-black tracking-[0.2em] border
-                  ${recommendation.confidence === 'high' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' :
-                    recommendation.confidence === 'medium' ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' :
-                    'bg-blue-500/20 border-blue-500/50 text-blue-400'}
-                `}>
-                  {recommendation.confidence.toUpperCase()} CONFIDENCE
-                </span>
+
+                {/* Win-rate badge (MCTS result) */}
+                {recommendation.winRate !== undefined && (
+                  <span className={`
+                    px-3 py-1 rounded-full text-xs font-black border
+                    ${recommendation.winRate >= 0.68
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                      : recommendation.winRate >= 0.50
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                        : 'bg-rose-500/20 border-rose-500/50 text-rose-300'}
+                  `}>
+                    {Math.round(recommendation.winRate * 100)}% WIN RATE
+                  </span>
+                )}
+
+                {/* Heuristic-only confidence badge (before MCTS arrives) */}
+                {recommendation.winRate === undefined && (
+                  <span className={`
+                    px-3 py-1 rounded-full text-[10px] font-black border
+                    ${recommendation.confidence === 'high' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' :
+                      recommendation.confidence === 'medium' ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' :
+                      'bg-blue-500/20 border-blue-500/50 text-blue-400'}
+                  `}>
+                    {recommendation.confidence.toUpperCase()} CONFIDENCE
+                  </span>
+                )}
+
+                {recommendation.simulations && (
+                  <span className="text-white/20 text-[10px] font-bold">
+                    {recommendation.simulations} deals
+                  </span>
+                )}
               </div>
-              <p className="text-white/70 text-sm leading-relaxed font-medium italic">"{recommendation.reason}"</p>
-              
+
+              <p className="text-white/70 text-sm leading-relaxed font-medium italic">
+                "{recommendation.reason}"
+              </p>
+
               {recommendation.alternativeCards && recommendation.alternativeCards.length > 0 && (
                 <div className="mt-4 flex items-center gap-3 flex-wrap">
-                  <span className="text-white/20 text-[10px] font-black uppercase tracking-widest">Secondary Options</span>
+                  <span className="text-white/20 text-[10px] font-black uppercase tracking-widest">Also consider</span>
                   <div className="flex gap-2">
                     {recommendation.alternativeCards.map((card, idx) => (
                       <span
                         key={idx}
                         className={`
                           px-3 py-1 rounded-lg text-xs font-bold border transition-colors
-                          ${trumpSuit === card.suit 
-                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' 
-                            : 'bg-white/5 border-white/10 text-white/40'
-                          }
+                          ${trumpSuit === card.suit
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                            : 'bg-white/5 border-white/10 text-white/40'}
                         `}
                       >
                         {SUIT_SYMBOLS[card.suit]} {card.rank}
