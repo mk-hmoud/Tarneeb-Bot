@@ -1,17 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useGameStore } from './store/gameStore';
 import { HandSetup } from './components/HandSetup';
 import { BiddingPhase } from './components/BiddingPhase';
 import { GameTable } from './components/GameTable';
-import { OpponentCardModal } from './components/OpponentCardModal';
+import { TrickLogger } from './components/TrickLogger';
 import { getRecommendation } from './utils/recommendationEngine';
 import type { Card, Suit, PlayerPosition, Bid } from './types';
-import { SUITS, SUIT_SYMBOLS, cardsEqual } from './types';
-import { Settings, RotateCcw, HelpCircle, UserPlus, Brain, Trophy, Sparkles } from 'lucide-react';
+import { cardsEqual } from './types';
+import { Settings, RotateCcw, HelpCircle, Brain, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 
 function App() {
   const {
+    appPhase,
+    setAppPhase,
     playerHand,
+    bids,
     trumpSuit,
     currentTrick,
     teamTricks,
@@ -22,7 +26,7 @@ function App() {
     addCardToHand,
     removeCardFromHand,
     clearPlayerHand,
-    setPlayerBid: setBid,
+    addBid,
     startPlayingPhase,
     playCard,
     awardTrick,
@@ -31,14 +35,9 @@ function App() {
   } = useGameStore();
 
   const [showSettings, setShowSettings] = useState(false);
-  const [bidTricks, setBidTricks] = useState(7);
-  const [bidTrump, setBidTrump] = useState<Suit>('spades');
   const [showHelp, setShowHelp] = useState(false);
-  const [showOpponentModal, setShowOpponentModal] = useState(false);
-  const [gamePhase, setGamePhase] = useState<'setup' | 'bidding' | 'playing'>('setup');
-  const [bids, setBids] = useState<Bid[]>([]);
 
-  // Calculate recommendation whenever game state changes
+  // Recalculate recommendation whenever relevant state changes
   useEffect(() => {
     if (phase === 'playing' && playerHand.length > 0 && currentTrick.length < 4) {
       const rec = getRecommendation({
@@ -59,17 +58,9 @@ function App() {
 
   const handleCardToggle = useCallback((card: Card) => {
     const exists = playerHand.some(c => cardsEqual(c, card));
-    if (exists) {
-      removeCardFromHand(card);
-    } else {
-      addCardToHand(card);
-    }
+    if (exists) removeCardFromHand(card);
+    else addCardToHand(card);
   }, [playerHand, addCardToHand, removeCardFromHand]);
-
-  const handleStartGame = useCallback(() => {
-    setBid(bidTricks, bidTrump);
-    startPlayingPhase();
-  }, [bidTricks, bidTrump, setBid, startPlayingPhase]);
 
   const handlePlayCard = useCallback((card: Card) => {
     playCard('south', card);
@@ -79,13 +70,9 @@ function App() {
     awardTrick(winner);
   }, [awardTrick]);
 
-  const handleRecordOpponentCard = useCallback((player: PlayerPosition, card: Card) => {
+  const handleRecordOpponent = useCallback((player: PlayerPosition, card: Card) => {
     playCard(player, card);
   }, [playCard]);
-
-  const handleUndo = useCallback(() => {
-    resetGame();
-  }, [resetGame]);
 
   const handleNewGame = useCallback(() => {
     resetGame();
@@ -94,24 +81,13 @@ function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowHelp(prev => !prev);
-      }
-      
-      if (e.key === 'n' && e.ctrlKey) {
-        e.preventDefault();
-        handleNewGame();
-      }
-      
-      if (e.key === 'u' && e.ctrlKey) {
-        e.preventDefault();
-        handleUndo();
-      }
+      if (e.key === 'Escape') setShowHelp(prev => !prev);
+      if (e.key === 'n' && e.ctrlKey) { e.preventDefault(); handleNewGame(); }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNewGame, handleUndo]);
+  }, [handleNewGame]);
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800 text-white">
@@ -140,7 +116,7 @@ function App() {
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <div className="hidden md:flex items-center gap-1 px-4 py-2 bg-white/5 rounded-xl border border-white/5 mr-2">
               <Sparkles className="w-3 h-3 text-amber-500" />
@@ -157,22 +133,12 @@ function App() {
             <button
               onClick={() => setShowSettings(true)}
               className="p-3 hover:bg-white/10 rounded-2xl transition-all border border-transparent hover:border-white/10 group"
-              title="Settings"
             >
               <Settings className="w-5 h-5 text-white/40 group-hover:text-white" />
             </button>
-            
+
             <div className="h-8 w-px bg-white/10 mx-2"></div>
 
-            {phase === 'playing' && (
-              <button
-                onClick={() => setShowOpponentModal(true)}
-                className="flex items-center gap-3 px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white rounded-2xl transition-all shadow-xl shadow-violet-500/20 font-black uppercase tracking-widest text-[10px] border border-violet-400/50"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span className="hidden sm:inline">Record Card</span>
-              </button>
-            )}
             <button
               onClick={handleNewGame}
               className="flex items-center gap-3 px-6 py-3 bg-white/5 hover:bg-white/10 text-white rounded-2xl transition-all font-black uppercase tracking-widest text-[10px] border border-white/10"
@@ -186,33 +152,30 @@ function App() {
 
       {/* Main Content */}
       <main className="relative max-w-7xl mx-auto px-4 py-6">
-        {gamePhase === 'setup' && (
+        {appPhase === 'setup' && (
           <HandSetup
             selectedCards={playerHand}
             onCardToggle={handleCardToggle}
             onClear={clearPlayerHand}
-            onStartGame={() => setGamePhase('bidding')}
+            onStartGame={() => setAppPhase('bidding')}
           />
         )}
 
-        {gamePhase === 'bidding' && (
+        {appPhase === 'bidding' && (
           <BiddingPhase
             playerHand={playerHand}
             bids={bids}
-            onPlaceBid={(bid) => {
-              setBids(prev => [...prev, bid]);
-            }}
-            onStartPlaying={() => {
-              setBid(bidTricks, bidTrump);
-              startPlayingPhase();
-              setGamePhase('playing');
+            onPlaceBid={(bid: Bid) => addBid(bid)}
+            onStartPlaying={(tricks: number, trump: Suit) => {
+              startPlayingPhase(tricks, trump);
+              setAppPhase('playing');
             }}
             currentBidder="south"
           />
         )}
 
-        {gamePhase === 'playing' && (
-          <>
+        {appPhase === 'playing' && (
+          <div className="space-y-4">
             <GameTable
               playerHand={playerHand}
               trumpSuit={trumpSuit}
@@ -222,18 +185,17 @@ function App() {
               playedCards={playedCards}
               recommendation={recommendation}
               onPlayCard={handlePlayCard}
-              onRecordOpponentCard={() => setShowOpponentModal(true)}
               onAwardTrick={handleAwardTrick}
-              onUndoLastPlay={handleUndo}
+              onUndoLastPlay={handleNewGame}
             />
 
-            <OpponentCardModal
-              isOpen={showOpponentModal}
-              onClose={() => setShowOpponentModal(false)}
-              onSubmit={handleRecordOpponentCard}
+            <TrickLogger
+              currentTrick={currentTrick}
               playedCards={playedCards}
+              trumpSuit={trumpSuit}
+              onRecord={handleRecordOpponent}
             />
-          </>
+          </div>
         )}
       </main>
 
@@ -246,23 +208,9 @@ function App() {
               Settings
             </h2>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">
-                  Card Display Size
-                </label>
-                <select className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
-                  <option>Medium</option>
-                  <option>Large</option>
-                  <option>Small</option>
-                </select>
-              </div>
               <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
                 <span className="text-sm text-gray-300">Show Card Counter</span>
                 <input type="checkbox" defaultChecked className="w-5 h-5 rounded accent-blue-500" />
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
-                <span className="text-sm text-gray-300">Sound Effects</span>
-                <input type="checkbox" className="w-5 h-5 rounded accent-blue-500" />
               </div>
               <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
                 <span className="text-sm text-gray-300">Auto-Recommendations</span>
@@ -291,61 +239,33 @@ function App() {
             </h2>
             <div className="space-y-6 text-sm text-gray-300">
               <section className="bg-gray-700/30 rounded-xl p-4">
-                <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
-                  <span className="text-lg">🎴</span>
-                  Setting Up
-                </h3>
+                <h3 className="font-semibold text-white mb-3">Setup</h3>
                 <ol className="list-decimal list-inside space-y-2">
-                  <li>Click on cards in the suit rows to select your 13 cards</li>
-                  <li>Set your bid (number of tricks) and trump suit</li>
-                  <li>Click "Start Game" to begin</li>
+                  <li>Tap your 13 cards in the hand setup screen</li>
+                  <li>Enter each player's bid in order</li>
+                  <li>The winning bidder picks the trump suit</li>
                 </ol>
               </section>
-              
               <section className="bg-gray-700/30 rounded-xl p-4">
-                <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
-                  <span className="text-lg">🎮</span>
-                  Playing
-                </h3>
+                <h3 className="font-semibold text-white mb-3">During Play</h3>
                 <ol className="list-decimal list-inside space-y-2">
-                  <li>Click on a card in your hand to play it</li>
-                  <li>The AI will recommend the best card (highlighted with green checkmark)</li>
-                  <li>After all 4 players play, select who won the trick</li>
-                  <li>The game tracks all played cards automatically</li>
+                  <li>Log opponent cards using the strip below the table — tap W / N / E then one tap on the rank</li>
+                  <li>Tap a card in your hand to record your play</li>
+                  <li>After all 4 cards are in, tap who won the trick</li>
+                  <li>The AI recommendation updates after every card logged</li>
                 </ol>
               </section>
-              
               <section className="bg-gray-700/30 rounded-xl p-4">
-                <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
-                  <span className="text-lg">⌨️</span>
-                  Keyboard Shortcuts
-                </h3>
+                <h3 className="font-semibold text-white mb-3">Keyboard Shortcuts</h3>
                 <ul className="space-y-2">
                   <li className="flex items-center gap-2">
                     <kbd className="px-3 py-1 bg-gray-700 rounded-lg font-mono text-xs">Ctrl+N</kbd>
                     <span>New Game</span>
                   </li>
                   <li className="flex items-center gap-2">
-                    <kbd className="px-3 py-1 bg-gray-700 rounded-lg font-mono text-xs">Ctrl+U</kbd>
-                    <span>Undo</span>
-                  </li>
-                  <li className="flex items-center gap-2">
                     <kbd className="px-3 py-1 bg-gray-700 rounded-lg font-mono text-xs">Esc</kbd>
                     <span>Toggle Help</span>
                   </li>
-                </ul>
-              </section>
-              
-              <section className="bg-gray-700/30 rounded-xl p-4">
-                <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
-                  <span className="text-lg">💡</span>
-                  Tips
-                </h3>
-                <ul className="list-disc list-inside space-y-2">
-                  <li>The recommendation shows confidence level (High/Medium/Low)</li>
-                  <li>Use the card counter to track which cards have been played</li>
-                  <li>The AI considers your bid progress when making recommendations</li>
-                  <li>Trump cards are highlighted in amber with a star</li>
                 </ul>
               </section>
             </div>
@@ -371,9 +291,6 @@ function App() {
               Tarneeb Protocol <span className="text-white/20">v1.0.4</span>
             </span>
           </div>
-          <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest">
-            Neural Card Assistant • 2024
-          </p>
         </div>
       </footer>
     </div>

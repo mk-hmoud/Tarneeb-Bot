@@ -2,7 +2,7 @@ import React from 'react';
 import type { Card, Suit, PlayedCard, PlayerPosition, Recommendation } from '../types';
 import { SUITS, SUIT_SYMBOLS, SUIT_COLORS, sortCards, groupCardsBySuit } from '../types';
 import { Card as CardComponent, MiniCard } from './Card';
-import { Trophy, Users, Target, RotateCcw, ChevronRight, Sparkles } from 'lucide-react';
+import { Trophy, RotateCcw, Sparkles } from 'lucide-react';
 
 interface GameTableProps {
   playerHand: Card[];
@@ -13,7 +13,6 @@ interface GameTableProps {
   playedCards: Card[];
   recommendation: Recommendation | null;
   onPlayCard: (card: Card) => void;
-  onRecordOpponentCard: () => void;
   onAwardTrick: (winner: PlayerPosition) => void;
   onUndoLastPlay: () => void;
 }
@@ -27,7 +26,6 @@ export const GameTable: React.FC<GameTableProps> = ({
   playedCards,
   recommendation,
   onPlayCard,
-  onRecordOpponentCard,
   onAwardTrick,
   onUndoLastPlay,
 }) => {
@@ -111,21 +109,13 @@ export const GameTable: React.FC<GameTableProps> = ({
             </div>
           </div>
           
-          <div className="flex flex-col gap-2">
-            <button
-              onClick={onUndoLastPlay}
-              className="flex items-center justify-center gap-2 px-4 py-1.5 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-all text-[10px] font-black uppercase tracking-widest border border-white/5"
-            >
-              <RotateCcw className="w-3 h-3" />
-              Undo
-            </button>
-            <button
-              onClick={onRecordOpponentCard}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-500/20 border border-blue-400/50"
-            >
-              Record
-            </button>
-          </div>
+          <button
+            onClick={onUndoLastPlay}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-all text-[10px] font-black uppercase tracking-widest border border-white/5"
+          >
+            <RotateCcw className="w-3 h-3" />
+            Undo
+          </button>
         </div>
       </div>
 

@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import type { Card, Suit, Rank, PlayerPosition, PlayedCard } from '../types';
-import { SUITS, RANKS, SUIT_SYMBOLS, SUIT_COLORS, RANK_VALUES } from '../types';
+import { RANKS, SUIT_SYMBOLS, SUIT_COLORS } from '../types';
 import { CheckCircle2, PlusCircle } from 'lucide-react';
 
 interface TrickLoggerProps {
   currentTrick: PlayedCard[];
   playedCards: Card[];
   trumpSuit: Suit | null;
-  southPlayed: boolean; // whether the user (south) has already played this trick
   onRecord: (player: PlayerPosition, card: Card) => void;
 }
 
@@ -36,7 +35,6 @@ export const TrickLogger: React.FC<TrickLoggerProps> = ({
   currentTrick,
   playedCards,
   trumpSuit,
-  southPlayed,
   onRecord,
 }) => {
   const [expanded, setExpanded] = useState<'west' | 'north' | 'east' | null>(null);
