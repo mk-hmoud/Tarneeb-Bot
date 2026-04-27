@@ -18,9 +18,11 @@ function App() {
     bids,
     trumpSuit,
     currentTrick,
+    trickLeader,
     teamTricks,
     playerBid,
     playedCards,
+    tricks,
     recommendation,
     phase,
     addCardToHand,
@@ -45,16 +47,17 @@ function App() {
         trumpSuit,
         currentTrick,
         playedCards,
-        trickLeader: null,
+        trickLeader,
         currentPlayer: 'south',
         teamTricks,
         playerBid,
+        tricks,
       });
       setRecommendation(rec);
     } else {
       setRecommendation(null);
     }
-  }, [playerHand, trumpSuit, currentTrick, playedCards, teamTricks, playerBid, phase, setRecommendation]);
+  }, [playerHand, trumpSuit, currentTrick, playedCards, teamTricks, playerBid, tricks, trickLeader, phase, setRecommendation]);
 
   const handleCardToggle = useCallback((card: Card) => {
     const exists = playerHand.some(c => cardsEqual(c, card));

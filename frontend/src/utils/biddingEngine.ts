@@ -1,335 +1,347 @@
 import type { Card, Suit, PlayerPosition, Bid } from '../types';
-import { SUITS, RANKS, RANK_VALUES } from '../types';
+import { SUITS, RANK_VALUES } from '../types';
 
 export interface BiddingRecommendation {
   suggestedTricks: number;
   confidence: 'high' | 'medium' | 'low';
   reasoning: string;
-  alternativeBids?: { tricks: number; reason: string }[];
+  suggestedTrump: Suit;
+  isKapCandidate: boolean;
+  alternativeBids: { tricks: number; reason: string }[];
 }
 
-// Calculate hand strength for bidding
-function analyzeHand(hand: Card[]): {
-  highCards: number; // A, K, Q, J, 10
+// ─── Hand analysis ────────────────────────────────────────────────────────────
+
+interface HandAnalysis {
+  suitCounts: Record<Suit, number>;
+  suitStrengths: Record<Suit, number>;
   aces: number;
   kings: number;
   queens: number;
   jacks: number;
   tens: number;
-  suitCounts: Record<Suit, number>;
-  suitStrengths: Record<Suit, number>;
+  highCards: number;
   voids: number;
   singletons: number;
-} {
-  const suitCounts: Record<Suit, number> = {
-    spades: 0, hearts: 0, diamonds: 0, clubs: 0
-  };
-  const suitStrengths: Record<Suit, number> = {
-    spades: 0, hearts: 0, diamonds: 0, clubs: 0
-  };
-  let highCards = 0;
-  let aces = 0;
-  let kings = 0;
-  let queens = 0;
-  let jacks = 0;
-  let tens = 0;
-  let voids = 0;
-  let singletons = 0;
+}
+
+function analyzeHand(hand: Card[]): HandAnalysis {
+  const suitCounts: Record<Suit, number> = { spades: 0, hearts: 0, diamonds: 0, clubs: 0 };
+  const suitStrengths: Record<Suit, number> = { spades: 0, hearts: 0, diamonds: 0, clubs: 0 };
+  let aces = 0, kings = 0, queens = 0, jacks = 0, tens = 0, highCards = 0;
 
   for (const card of hand) {
     suitCounts[card.suit]++;
-    
-    const value = RANK_VALUES[card.rank];
-    if (value >= 10) { // 10, J, Q, K, A
-      highCards++;
-      suitStrengths[card.suit] += value;
-    }
+    const v = RANK_VALUES[card.rank];
+    if (v >= 10) { highCards++; suitStrengths[card.suit] += v; }
     if (card.rank === 'A') aces++;
-    if (card.rank === 'K') kings++;
-    if (card.rank === 'Q') queens++;
-    if (card.rank === 'J') jacks++;
-    if (card.rank === '10') tens++;
+    else if (card.rank === 'K') kings++;
+    else if (card.rank === 'Q') queens++;
+    else if (card.rank === 'J') jacks++;
+    else if (card.rank === '10') tens++;
   }
-  
-  // Count voids and singletons
+
+  let voids = 0, singletons = 0;
   for (const suit of SUITS) {
     if (suitCounts[suit] === 0) voids++;
     else if (suitCounts[suit] === 1) singletons++;
   }
 
-  return { highCards, aces, kings, queens, jacks, tens, suitCounts, suitStrengths, voids, singletons };
+  return { suitCounts, suitStrengths, aces, kings, queens, jacks, tens, highCards, voids, singletons };
 }
 
-// Determine best trump suit based on hand
-function findBestTrump(
-  suitCounts: Record<Suit, number>,
-  suitStrengths: Record<Suit, number>,
-  aces: number,
-  kings: number
-): { suit: Suit; strength: number } {
-  const suitScores: { suit: Suit; score: number }[] = [];
+// ─── Best trump selection ─────────────────────────────────────────────────────
 
-  for (const suit of SUITS) {
-    let score = 0;
+/**
+ * Score each suit as potential trump, optionally penalising suits opponents bid heavily in.
+ */
+function findBestTrump(
+  hand: Card[],
+  analysis: HandAnalysis,
+  opponentBidSuit?: Suit,
+): { suit: Suit; score: number } {
+  const { suitCounts, suitStrengths } = analysis;
+
+  const scores = SUITS.map(suit => {
     const count = suitCounts[suit];
     const strength = suitStrengths[suit];
+    let score = count * 3 + strength * 0.4;
 
-    // Number of cards in suit
-    score += count * 2;
-    
-    // Strength of cards
-    score += strength * 0.5;
-    
-    // Having Ace is valuable
-    // (We can't check directly, but high strength usually indicates it)
-    
-    // Long suits are good for trump (exponential points for more cards)
-    if (count >= 6) score += 12;
-    else if (count >= 5) score += 8;
+    if (count >= 6) score += 14;
+    else if (count >= 5) score += 9;
     else if (count >= 4) score += 5;
-    else if (count >= 3) score += 2;
-    else if (count <= 1) score -= 3;
+    else if (count === 1) score -= 4;
+    else if (count === 0) score -= 10;
 
-    suitScores.push({ suit, score });
-  }
+    // Check for high trump cards
+    const suitCards = hand.filter(c => c.suit === suit);
+    const hasAce = suitCards.some(c => c.rank === 'A');
+    const hasKing = suitCards.some(c => c.rank === 'K');
+    const hasQueen = suitCards.some(c => c.rank === 'Q');
+    if (hasAce) score += 4;
+    if (hasKing) score += 2;
+    if (hasQueen) score += 1;
 
-  suitScores.sort((a, b) => b.score - a.score);
-  return { suit: suitScores[0].suit, strength: suitScores[0].score };
+    // Penalty if opponent already bid this suit aggressively (they have more of it)
+    if (opponentBidSuit && suit === opponentBidSuit) score -= 8;
+
+    return { suit, score };
+  });
+
+  scores.sort((a, b) => b.score - a.score);
+  return scores[0];
 }
 
-  // Estimate tricks based on hand analysis
-  function estimateTricks(
-    hand: Card[],
-    suitCounts: Record<Suit, number>,
-    highCards: number,
-    aces: number,
-    kings: number,
-    queens: number,
-    jacks: number,
-    tens: number,
-    voids: number,
-    singletons: number,
-    bestTrump: Suit
-  ): number {
-    let estimatedTricks = 0;
+// ─── Trick estimation ─────────────────────────────────────────────────────────
 
-    // Count high cards in trump suit separately - they are more valuable
-    const trumpAces = hand.filter(c => c.suit === bestTrump && c.rank === 'A').length;
-    const trumpKings = hand.filter(c => c.suit === bestTrump && c.rank === 'K').length;
-    const trumpQueens = hand.filter(c => c.suit === bestTrump && c.rank === 'Q').length;
-    const trumpJacks = hand.filter(c => c.suit === bestTrump && c.rank === 'J').length;
-    const trumpTens = hand.filter(c => c.suit === bestTrump && c.rank === '10').length;
+function estimateTricks(hand: Card[], analysis: HandAnalysis, trump: Suit): number {
+  const { suitCounts, aces, kings, queens, jacks, tens, voids, singletons } = analysis;
+  let est = 0;
 
-    // Trump suit high cards are almost guaranteed winners
-    estimatedTricks += trumpAces * 1.2;
-    estimatedTricks += trumpKings * 1.0;
-    estimatedTricks += trumpQueens * 0.8;
-    estimatedTricks += trumpJacks * 0.6;
-    estimatedTricks += trumpTens * 0.4;
+  const count = (suit: Suit, rank: string) =>
+    hand.filter(c => c.suit === suit && c.rank === rank).length;
 
-    // Non-trump high cards are less valuable
-    estimatedTricks += (aces - trumpAces) * 1.0;
-    estimatedTricks += (kings - trumpKings) * 0.7;
-    estimatedTricks += (queens - trumpQueens) * 0.4;
-    estimatedTricks += (jacks - trumpJacks) * 0.2;
-    estimatedTricks += (tens - trumpTens) * 0.1;
+  // High cards in trump (near-guaranteed tricks)
+  est += count(trump, 'A') * 1.2;
+  est += count(trump, 'K') * 1.0;
+  est += count(trump, 'Q') * 0.8;
+  est += count(trump, 'J') * 0.6;
+  est += count(trump, '10') * 0.4;
 
-    // Long suits give huge advantage, especially in trump
-    for (const suit of SUITS) {
-      const count = suitCounts[suit];
-      const isTrump = suit === bestTrump;
-      
-      if (count >= 6) {
-        estimatedTricks += isTrump ? 4.0 : 1.5; // 6 card trump is massive advantage
-      } else if (count >= 5) {
-        estimatedTricks += isTrump ? 2.5 : 1.5;
-      } else if (count >= 4) {
-        estimatedTricks += isTrump ? 1.5 : 0.8;
-      } else if (count >= 3) {
-        estimatedTricks += isTrump ? 0.8 : 0.3;
-      }
-    }
+  // High cards in side suits (less reliable — can be trumped)
+  const nonTrumpAces  = aces  - count(trump, 'A');
+  const nonTrumpKings = kings - count(trump, 'K');
+  const nonTrumpQueens = queens - count(trump, 'Q');
+  const nonTrumpJacks = jacks - count(trump, 'J');
+  const nonTrumpTens  = tens  - count(trump, '10');
 
-    // Voids and singletons are great for trumping
-    estimatedTricks += voids * 1.0;
-    estimatedTricks += singletons * 0.5;
+  est += nonTrumpAces  * 0.95;
+  est += nonTrumpKings * 0.65;
+  est += nonTrumpQueens * 0.35;
+  est += nonTrumpJacks * 0.15;
+  est += nonTrumpTens  * 0.08;
 
-    // Assume teammate (North) will contribute at least 1 guaranteed trick
-    estimatedTricks += 1.0;
-
-    // Bonus for sequential high cards (AKQ sequences)
-    // These guarantee taking multiple tricks and drawing opponent trumps
-    for (const suit of SUITS) {
-      const suitCards = hand.filter(c => c.suit === suit);
-      const cardRanks = suitCards.map(c => RANK_VALUES[c.rank]);
-      const isTrump = suit === bestTrump;
-      
-      // Check for sequences
-      const hasAce = cardRanks.includes(14);
-      const hasKing = cardRanks.includes(13);
-      const hasQueen = cardRanks.includes(12);
-      const hasJack = cardRanks.includes(11);
-      
-      let sequenceBonus = 0;
-      if (hasAce && hasKing && hasQueen) sequenceBonus += 3.0; // AKQ sequence
-      else if (hasAce && hasKing) sequenceBonus += 1.5; // AK sequence
-      else if (hasKing && hasQueen) sequenceBonus += 1.0; // KQ sequence
-      else if (hasAce && hasQueen) sequenceBonus += 0.8; // AQ sequence
-
-      // Sequences are MUCH more powerful in trump suit
-      if (isTrump) {
-        sequenceBonus *= 1.5;
-      }
-      
-      estimatedTricks += sequenceBonus;
-    }
-
-  // Base estimate: average hand should bid around 7-8
-  
-  // Round to nearest integer
-  const rounded = Math.round(estimatedTricks);
-  
-  // Most hands should bid at least 7 (weak hands pass)
-  // Only pass if truly weak (< 3.5 estimated tricks)
-  if (rounded < 4) {
-    return 0; // Pass - very weak hand
+  // Long-suit length tricks
+  for (const suit of SUITS) {
+    const n = suitCounts[suit];
+    const isTrump = suit === trump;
+    if (n >= 6) est += isTrump ? 4.0 : 1.5;
+    else if (n >= 5) est += isTrump ? 2.5 : 1.0;
+    else if (n >= 4) est += isTrump ? 1.5 : 0.5;
+    else if (n >= 3) est += isTrump ? 0.8 : 0.2;
   }
-  
-  // For borderline hands (4-6 tricks), suggest minimum bid
-  // The user can always choose to pass
-  if (rounded >= 4 && rounded < 7) {
-    return 7; // Minimum bid
+
+  // Ruffing potential from voids/singletons
+  est += voids * 1.0;
+  est += singletons * 0.5;
+
+  // Sequence bonuses
+  for (const suit of SUITS) {
+    const sc = hand.filter(c => c.suit === suit);
+    const has = (r: string) => sc.some(c => c.rank === r);
+    const isTrump = suit === trump;
+    let bonus = 0;
+    if (has('A') && has('K') && has('Q')) bonus += 2.5;
+    else if (has('A') && has('K')) bonus += 1.2;
+    else if (has('K') && has('Q')) bonus += 0.8;
+    else if (has('A') && has('Q')) bonus += 0.7;
+    if (isTrump) bonus *= 1.4;
+    est += bonus;
   }
-  
-  // Cap at 13
-  return Math.min(rounded, 13);
+
+  return est;
 }
+
+// ─── Bidding position helpers ─────────────────────────────────────────────────
+
+type BidPosition = 'first' | 'second' | 'third' | 'fourth';
+
+function getBidPosition(
+  myPosition: PlayerPosition,
+  starterPosition: PlayerPosition,
+): BidPosition {
+  const CCW: PlayerPosition[] = ['west', 'south', 'east', 'north'];
+  const startIdx = CCW.indexOf(starterPosition);
+  const myIdx = CCW.indexOf(myPosition);
+  const order = ((myIdx - startIdx + 4) % 4) + 1;
+  if (order === 1) return 'first';
+  if (order === 2) return 'second';
+  if (order === 3) return 'third';
+  return 'fourth';
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export function getBiddingRecommendation(
   hand: Card[],
   previousBids: Bid[],
-  currentBidder: PlayerPosition,
-  isPlayerTurn: boolean
+  myPosition: PlayerPosition,
+  _isPlayerTurn: boolean,
 ): BiddingRecommendation | null {
   if (hand.length === 0) return null;
 
   const analysis = analyzeHand(hand);
-  const { highCards, aces, kings, queens, jacks, tens, suitCounts, suitStrengths, voids, singletons } = analysis;
-  
-  // Find best trump
-  const bestTrump = findBestTrump(suitCounts, suitStrengths, aces, kings);
-  
-  // Estimate tricks
-  const estimatedTricks = estimateTricks(hand, suitCounts, highCards, aces, kings, queens, jacks, tens, voids, singletons, bestTrump.suit);
-  
-  // Get current highest bid
-  const validBids = previousBids.filter(b => b.tricks > 0);
-  const highestPreviousBid = validBids.length > 0
-    ? Math.max(...validBids.map(b => b.tricks))
-    : 6; // Below minimum bid
+  const { aces, kings, highCards, suitCounts } = analysis;
 
-  // Get last bidder to see if it's teammate
-  const lastBid = validBids.length > 0 ? validBids[validBids.length - 1] : null;
-  const lastBidByTeammate = lastBid?.player === 'north';
+  // ── Determine bidding context ────────────────────────────────────────────────
 
-  let suggestedTricks = estimatedTricks;
-  
-  // Enforce minimum bid of 7
-  if (suggestedTricks > 0 && suggestedTricks < 7) {
-    suggestedTricks = 7;
+  const realBids = previousBids.filter(b => b.tricks > 0);
+  const currentHighest = realBids.length > 0 ? Math.max(...realBids.map(b => b.tricks)) : 6;
+  const minRequired = Math.max(currentHighest + 1, 7);
+
+  const partnerBid = realBids.find(b => b.player === 'north');
+  const opponentBids = realBids.filter(b => b.player === 'west' || b.player === 'east');
+  const opponentHighest = opponentBids.length > 0 ? Math.max(...opponentBids.map(b => b.tricks)) : 0;
+
+  // Infer likely opponent trump suit from their highest bid (they bid it first)
+  const opponentBidSuit: Suit | undefined = opponentBids.length > 0
+    ? (opponentBids.find(b => b.tricks === opponentHighest)?.trump ?? undefined)
+    : undefined;
+
+  // ── Find best trump ──────────────────────────────────────────────────────────
+
+  const bestTrump = findBestTrump(hand, analysis, opponentBidSuit);
+
+  // ── Estimate my solo tricks ──────────────────────────────────────────────────
+
+  let myEst = estimateTricks(hand, analysis, bestTrump.suit);
+
+  // ── Position adjustment ──────────────────────────────────────────────────────
+
+  const starterPos = previousBids[0]?.player ?? 'west';
+  const position = getBidPosition(myPosition, starterPos);
+
+  // Bidding last has more info — slight confidence boost; no estimate adjustment needed
+  // Bidding first with a marginal hand: be more conservative
+  if (position === 'first' && myEst < 8) {
+    myEst -= 0.5; // Conservative opening: opponent after you might have more
   }
-  
-  // If we have a very strong hand, we can bid more aggressively
-  if (highCards >= 6 && aces >= 3) {
-    suggestedTricks = Math.max(suggestedTricks, 9);
+  if (position === 'fourth' && myEst >= 7) {
+    myEst += 0.3; // Bidding last: you've heard everyone, slight upward nudge
   }
-  
-  // Must bid 1 higher than current highest
-  const minimumRequiredBid = Math.max(highestPreviousBid + 1, 7);
-  
-  // TEAM STRATEGY: Don't bid over teammate unless absolutely necessary
-  if (lastBidByTeammate) {
-    if (suggestedTricks < 10) {
-      // Hand not strong enough to bid over teammate - pass
-      return {
-        suggestedTricks: 0, // Pass
-        confidence: 'high',
-        reasoning: `Current bid of ${highestPreviousBid} is by your teammate. Your hand is worth ${estimatedTricks} tricks. Only bid over if you have a very strong hand.`,
-        alternativeBids: lastBidByTeammate && suggestedTricks >= 10
-          ? [{ tricks: minimumRequiredBid, reason: 'Bid over teammate with strong hand' }]
-          : []
-      };
-    }
+
+  // ── Partner inference ────────────────────────────────────────────────────────
+
+  let partnerContribution = 0;
+  if (partnerBid) {
+    // Partner has already bid: their bid indicates their hand strength.
+    // Rough rule: bid = 7 → ~2 tricks; 8 → ~3; 9 → ~4; etc.
+    partnerContribution = partnerBid.tricks - 5; // approx tricks partner controls
+    // Don't double-count: reduce my estimate since partner's tricks are theirs
+    myEst -= partnerContribution * 0.4;
   }
-  
-  // If our estimate is below minimum required bid, pass
-  if (estimatedTricks < minimumRequiredBid - 1) {
+
+  // ── Kap detection ────────────────────────────────────────────────────────────
+
+  // Kap = bidding all 13 tricks.  Requires near-total hand control.
+  const trumpCards = hand.filter(c => c.suit === bestTrump.suit);
+  const controlledTrumps = trumpCards.filter(c =>
+    c.rank === 'A' || c.rank === 'K' || c.rank === 'Q'
+  ).length;
+  const sideAces = hand.filter(c => c.suit !== bestTrump.suit && c.rank === 'A').length;
+  const kapSignal =
+    myEst >= 10.5 ||
+    (controlledTrumps >= 3 && sideAces >= 2 && highCards >= 8) ||
+    (suitCounts[bestTrump.suit] >= 6 && aces >= 3);
+  const isKapCandidate = kapSignal;
+
+  // ── Final bid recommendation ─────────────────────────────────────────────────
+
+  const roundedEst = Math.round(myEst);
+
+  // Don't overbid partner unless hand is very strong
+  const partnerIsHighBidder = partnerBid && partnerBid.tricks === currentHighest;
+  if (partnerIsHighBidder && roundedEst < 10) {
     return {
       suggestedTricks: 0, // Pass
-      confidence: 'medium',
-      reasoning: `Your hand is worth about ${estimatedTricks} tricks. Current bid is ${highestPreviousBid}, you would need to bid ${minimumRequiredBid}. Consider passing.`,
-      alternativeBids: [
-        { tricks: minimumRequiredBid, reason: 'Aggressive bid if you think opponents are weak' }
-      ]
+      confidence: 'high',
+      suggestedTrump: bestTrump.suit,
+      isKapCandidate: false,
+      reasoning: buildPassReason(partnerBid.tricks, roundedEst),
+      alternativeBids: roundedEst >= minRequired
+        ? [{ tricks: minRequired, reason: 'Only if partner is weak in trump' }]
+        : [],
     };
   }
-  
-  // Suggest minimum required bid or higher
-  suggestedTricks = Math.max(suggestedTricks, minimumRequiredBid);
-  
-  // Cap at 13
-  suggestedTricks = Math.min(suggestedTricks, 13);
 
-  // Determine confidence
-  let confidence: 'high' | 'medium' | 'low' = 'medium';
-  if (aces >= 3 && highCards >= 6) confidence = 'high';
-  else if (aces >= 2 && highCards >= 4) confidence = 'medium';
-  else confidence = 'low';
-
-  // Generate reasoning
-  const reasoningParts: string[] = [];
-  reasoningParts.push(`You have ${highCards} high cards (A, K, Q)`);
-  reasoningParts.push(`${aces} Ace${aces !== 1 ? 's' : ''}, ${kings} King${kings !== 1 ? 's' : ''}`);
-  reasoningParts.push(`Strongest suit is ${bestTrump.suit} with ${suitCounts[bestTrump.suit]} cards`);
-  
-  if (estimatedTricks >= 10) {
-    reasoningParts.push('Very strong hand - consider bidding high');
-  } else if (estimatedTricks >= 8) {
-    reasoningParts.push('Good hand with solid trick potential');
-  } else {
-    reasoningParts.push('Moderate hand - bid cautiously');
+  // Below minimum required → pass
+  if (roundedEst < minRequired - 1 && !isKapCandidate) {
+    return {
+      suggestedTricks: 0,
+      confidence: roundedEst < minRequired - 2 ? 'high' : 'medium',
+      suggestedTrump: bestTrump.suit,
+      isKapCandidate: false,
+      reasoning: `Hand worth ~${roundedEst} tricks; current bid is ${currentHighest}. Not strong enough to bid ${minRequired}.`,
+      alternativeBids: [
+        { tricks: minRequired, reason: 'Aggressive — if opponents look weak' },
+      ],
+    };
   }
+
+  const suggestedTricks = isKapCandidate ? 13 : Math.max(roundedEst, minRequired);
+  const capped = Math.min(suggestedTricks, 13);
+
+  const confidence: 'high' | 'medium' | 'low' =
+    (aces >= 3 && highCards >= 6) ? 'high' :
+    (aces >= 2 && highCards >= 4) ? 'medium' : 'low';
+
+  const reasoning = buildBidReason(hand, analysis, bestTrump.suit, capped, position, partnerBid);
 
   const alternativeBids: { tricks: number; reason: string }[] = [];
-  
-  // Suggest alternative bids
-  if (suggestedTricks > 7) {
-    alternativeBids.push({
-      tricks: suggestedTricks - 1,
-      reason: 'Safer bid if opponents seem strong'
-    });
-  }
-  if (suggestedTricks < 13) {
-    alternativeBids.push({
-      tricks: suggestedTricks + 1,
-      reason: 'Aggressive bid to pressure opponents'
-    });
-  }
+  if (capped > 7) alternativeBids.push({ tricks: capped - 1, reason: 'Safe — if opponents look strong' });
+  if (capped < 13 && !isKapCandidate) alternativeBids.push({ tricks: capped + 1, reason: 'Aggressive — if hand feels strong' });
+  if (isKapCandidate && capped < 13) alternativeBids.push({ tricks: 13, reason: 'Kap — only if hand is iron-clad' });
 
   return {
-    suggestedTricks,
+    suggestedTricks: capped,
     confidence,
-    reasoning: reasoningParts.join('. ') + '.',
-    alternativeBids: alternativeBids.slice(0, 3)
+    suggestedTrump: bestTrump.suit,
+    isKapCandidate,
+    reasoning,
+    alternativeBids,
   };
 }
 
-// Get bid description
+// ─── Reasoning text builders ──────────────────────────────────────────────────
+
+function buildPassReason(partnerBid: number, myEst: number): string {
+  return `Partner bid ${partnerBid} — let them lead. Your hand adds ~${myEst} tricks but not enough to justify overbidding.`;
+}
+
+function buildBidReason(
+  hand: Card[],
+  analysis: HandAnalysis,
+  trump: Suit,
+  suggestedTricks: number,
+  position: BidPosition,
+  partnerBid: Bid | undefined,
+): string {
+  const { aces, kings, highCards, suitCounts } = analysis;
+  const parts: string[] = [];
+
+  parts.push(`${highCards} high cards (${aces}A ${kings}K)`);
+
+  const trumpCount = suitCounts[trump];
+  const trumpSymbols: Record<Suit, string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
+  parts.push(`${trumpCount} ${trumpSymbols[trump]} trumps`);
+
+  if (partnerBid) {
+    parts.push(`partner bid ${partnerBid.tricks}`);
+  }
+
+  if (position === 'fourth') parts.push('bidding last (more info)');
+  if (position === 'first') parts.push('opening bid');
+
+  if (suggestedTricks === 13) parts.push('Kap potential!');
+
+  return parts.join(' · ') + ` → bid ${suggestedTricks}.`;
+}
+
 export function getBidDescription(tricks: number): string {
   if (tricks === 0) return 'Pass';
-  if (tricks === 7) return 'Minimum bid';
-  if (tricks === 8) return 'Moderate bid';
-  if (tricks === 9) return 'Strong bid';
+  if (tricks === 13) return 'Kap!';
   if (tricks >= 10) return 'Aggressive bid';
-  return `${tricks} tricks`;
+  if (tricks === 9) return 'Strong bid';
+  if (tricks === 8) return 'Moderate bid';
+  return 'Minimum bid';
 }

@@ -49,7 +49,10 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({
   // Recalculate recommendation when it's the player's turn
   useEffect(() => {
     if (currentInputPlayer === 'south' && playerHand.length === 13) {
-      setRecommendation(getBiddingRecommendation(playerHand, bids, 'south', true));
+      const rec = getBiddingRecommendation(playerHand, bids, 'south', true);
+      setRecommendation(rec);
+      // Pre-select the AI's suggested trump
+      if (rec?.suggestedTrump) setTrumpSuit(rec.suggestedTrump);
     } else {
       setRecommendation(null);
     }
@@ -177,8 +180,12 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({
 
           {/* AI Recommendation */}
           {currentInputPlayer === 'south' && recommendation && (
-            <div className="bg-blue-900/20 rounded-xl p-4 mb-4 border border-blue-700/30">
-              <div className="flex items-center gap-2 mb-1">
+            <div className={`rounded-xl p-4 mb-4 border ${
+              recommendation.isKapCandidate
+                ? 'bg-amber-900/20 border-amber-600/40'
+                : 'bg-blue-900/20 border-blue-700/30'
+            }`}>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <Brain className="w-4 h-4 text-blue-400" />
                 <span className="text-blue-400 font-semibold text-sm">AI Recommendation</span>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
@@ -188,10 +195,25 @@ export const BiddingPhase: React.FC<BiddingPhaseProps> = ({
                 }`}>
                   {recommendation.confidence.toUpperCase()}
                 </span>
+                {recommendation.isKapCandidate && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white animate-pulse">
+                    KAP CANDIDATE
+                  </span>
+                )}
               </div>
-              <p className="text-2xl font-black text-white">
-                {recommendation.suggestedTricks === 0 ? 'Pass' : `Bid ${recommendation.suggestedTricks}`}
-              </p>
+              <div className="flex items-baseline gap-3">
+                <p className="text-2xl font-black text-white">
+                  {recommendation.suggestedTricks === 0 ? 'Pass' : `Bid ${recommendation.suggestedTricks}`}
+                </p>
+                {recommendation.suggestedTricks > 0 && (
+                  <span className="text-white/50 text-sm">
+                    trump: <span className={`font-black ${
+                      recommendation.suggestedTrump === 'hearts' || recommendation.suggestedTrump === 'diamonds'
+                        ? 'text-rose-400' : 'text-white'
+                    }`}>{SUIT_SYMBOLS[recommendation.suggestedTrump]}</span>
+                  </span>
+                )}
+              </div>
               <p className="text-gray-400 text-xs mt-1 leading-relaxed">{recommendation.reasoning}</p>
             </div>
           )}
